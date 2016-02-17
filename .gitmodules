@@ -1,0 +1,4 @@
+[submodule "pages"]
+	path = pages
+	url = git@github.com:myuon/SNS-game.git
+	branch = origin/gh-pages
