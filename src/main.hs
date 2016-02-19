@@ -73,18 +73,22 @@ cost :: Has (Union xs) "cost" out => Lens' (Union xs) out; cost = lenses (Name :
 type Building = UnionT '[
   "ident" :< String,
   "name" :< String,
-  "value" :< Double,
   "premise" :< [String],
   "interval" :< (Double -> Double)
   ]
 
-value :: Has (Union xs) "value" out => Lens' (Union xs) out; value = lenses (Name :: Name "value")
 interval :: Has (Union xs) "interval" out => Lens' (Union xs) out; interval = lenses (Name :: Name "interval")
 
 type Item = UnionT '[
   "ident" :< String,
   "name" :< String,
   "description" :< String
+  ]
+
+type Achievement = UnionT '[
+  "name" :< String,
+  "description" :< String,
+  "check" :< (Game -> Bool)
   ]
 
 type Game = UnionT '[
@@ -110,8 +114,8 @@ initialGame =
   sinsert (Tag []) $
   Union HNil
 
-makeUnlock :: String -> String -> String -> [String] -> [(String, Int)] -> Unlock
-makeUnlock i n d p c =
+makeUnlock :: String -> String -> [String] -> [(String, Int)] -> String -> Unlock
+makeUnlock i n p c d =
   sinsert (Tag i :: "ident" :< String) $
   sinsert (Tag n :: "name" :< String) $
   sinsert (Tag d :: "description" :< String) $
@@ -121,19 +125,77 @@ makeUnlock i n d p c =
 
 unlockMap :: [Unlock]
 unlockMap = [
-  makeUnlock "install-plugin" "<i class=\"fa fa-puzzle-piece fa-fw\"></i>プラグイン導入" "プラグインを導入します<br />外部アプリケーションを利用することができるようになります" [] [("posts", 200)],
-  makeUnlock "install-client" "<i class=\"fa fa-cube fa-fw\"></i>クライアント導入" "新しいクライアントを導入します" ["install-plugin"] [("plugin", 100)],
-  makeUnlock "multiple-accounts" "<i class=\"fa fa-users fa-fw\"></i>サブアカウントの管理" "複数のアカウントを作成し・管理します" ["install-client"] [],
-  makeUnlock "multiple-accounts-boost" "<i class=\"fa fa-user-plus fa-fw\"></i>サブアカウント作成効率I" "サブアカウントの作成効率を上げます" ["multiple-accounts"] [],
-  makeUnlock "post-bomb" "<i class=\"fa fa-commenting fa-fw\"></i>投稿効率I" "一度にできる投稿数が増えます" ["install-client"] [],
-  makeUnlock "connect-SNS" "<i class=\"fa fa-share-alt fa-fw\"></i>外部アプリ共有" "メッセージを他のSNSで共有したりできます" ["install-plugin"] [],
-  makeUnlock "invitation-mail" "<i class=\"fa fa-share-alt fa-fw\"></i>招待メール" "招待メールを送ります<br />新規ユーザーが増えます" ["connect-SNS"] [],
-  makeUnlock "make-friends-newcomer" "<i class=\"fa fa-share-alt fa-fw\"></i>新規参入フレンド" "新規ユーザーとフレンドになります" ["invitation-mail"] [],
-  makeUnlock "programming" "<i class=\"fa fa-laptop fa-fw\"></i>プログラミングI" "簡単なプログラムを書いて、ある程度の処理を自動化できます" [] [],
-  makeUnlock "auto-post" "<i class=\"fa fa-gear fa-fw\"></i>自動投稿I" "定期的にメッセージを投稿できます" ["programming"] [],
-  makeUnlock "programming-2" "<i class=\"fa fa-desktop fa-fw\"></i>プログラミングII" "より高度なプログラムによって、たくさんの処理を一度に行います" ["programming"] [],
-  makeUnlock "auto-create-account" "<i class=\"fa fa-user-plus fa-fw\"></i>自動新規アカウント生成" "一定時間ごとに新規アカウントを作成します" ["programming-2"] [],
-  makeUnlock "programming-3" "<i class=\"fa fa-desktop fa-fw\"></i>プログラミングIII" "さらに高度なプログラムによって、大量の処理を効率的に自動的に行います" ["programming-2"] []
+  makeUnlock
+    "install-plugin" "<i class=\"fa fa-puzzle-piece fa-fw\"></i>プラグイン導入" ["root"] [("posts", 100)]
+    "プラグインを導入します<br />外部アプリケーションを利用することができるようになります" ,
+  makeUnlock
+    "install-client" "<i class=\"fa fa-cube fa-fw\"></i>クライアント導入" ["install-plugin"] [("plugin", 100)]
+    "新しいクライアントを導入します" ,
+  makeUnlock
+    "multiple-accounts" "<i class=\"fa fa-users fa-fw\"></i>サブアカウントの管理" ["install-client"] [("plugin", 5000)]
+    "複数のアカウントを作成し・管理します<br /> \
+    \ <strong>注意*</strong> 無闇に複数のアカウントを作成することは規約違反にあたります",
+  makeUnlock
+    "multiple-accounts-boost" "<i class=\"fa fa-user-plus fa-fw\"></i>アカウント作成効率I" ["multiple-accounts"] []
+    "サブアカウントの作成効率を上げます",
+  makeUnlock
+    "post-bomb" "<i class=\"fa fa-commenting fa-fw\"></i>投稿効率I" ["install-client", "programming"] [("plugin", 10000), ("code", 7000)]
+    "同じ内容のメッセージを一度に大量に投稿することができます<br /> \
+    \ <strong>注意*</strong> 無闇に同じ内容の投稿を繰り返すことは規約違反にあたります",
+  makeUnlock
+    "quote-post" "<i class=\"fa fa-quote-left fa-fw\"></i>人気ポストの引用" ["install-client"] []
+    "タイムラインの人気のポストを引用し、あなたのメッセージとして投稿します<br />これにより、あなたの投稿はより面白いポストで占められます<br /> \
+    \ <strong>注意*</strong> 他人のメッセージを自分のものとして投稿することは規約違反にあたります",
+  makeUnlock
+    "connect-SNS" "<i class=\"fa fa-share-alt fa-fw\"></i>外部アプリ共有" ["install-plugin"] []
+    "メッセージを他のSNSで共有できます",
+  makeUnlock
+    "invitation-mail" "<i class=\"fa fa-envelope fa-fw\"></i>招待メール" ["connect-SNS"] []
+    "招待メールを送ります<br />新規ユーザーが増えます",
+  makeUnlock
+    "make-friends-newcomer" "<i class=\"fa fa-envelope fa-fw\"></i>新規参入フレンド" ["invitation-mail"] []
+    "新規ユーザーとフレンドになります",
+  makeUnlock
+    "post-ads" "<i class=\"fa fa-bullhorn fa-fw\"></i>広告メッセージ" ["connect-SNS"] []
+    "広告リンクを投稿し、クリック数に応じて報酬がもらえる制度を利用できます<br /> \
+    \ <strong>注意*</strong> ターゲットにマッチしない広告はあまり効果がありません",
+  makeUnlock
+    "auto-ads" "<i class=\"fa fa-bullhorn fa-fw\"></i>広告の自動投稿" ["post-ads", "programming-1"] []
+    "広告を自動で投稿します",
+  makeUnlock
+    "programming" "<i class=\"fa fa-laptop fa-fw\"></i>プログラミングI" ["root", "install-plugin"] [("plugin", 3000)]
+    "簡単なプログラムを書いて、ある程度の処理を自動化できます",
+  makeUnlock
+    "auto-post" "<i class=\"fa fa-gear fa-fw\"></i>自動投稿I" ["programming", "install-plugin"] []
+    "定期的にメッセージを投稿できます<br /> \
+    \ <strong>注意*</strong> 短時間に大量の投稿をすることは規約違反にあたります",
+  makeUnlock
+    "programming-2" "<i class=\"fa fa-desktop fa-fw\"></i>プログラミングII" ["programming"] []
+    "より高度なプログラムによって、たくさんの処理を一度に行います",
+  makeUnlock
+    "auto-create-account" "<i class=\"fa fa-user-plus fa-fw\"></i>自動新規アカウント生成" ["programming-2", "multiple-accounts"] []
+    "一定時間ごとに新規アカウントを作成します",
+  makeUnlock
+    "programming-3" "<i class=\"fa fa-desktop fa-fw\"></i>プログラミングIII" ["programming-2"] []
+    "さらに高度なプログラムによって、大量の処理を効率的に自動的に行います",
+  makeUnlock
+    "programmer" "<i class=\"fa fa-male fa-fw\"></i>プログラマの雇用" ["programming-2", "ads-post"] []
+    "プログラマを雇用して、必要な作業を任せることが出来ます",
+  makeUnlock
+    "kiosk-shop" "<i class=\"fa fa-shopping-cart fa-fw\"></i>コンビニの利用" ["root", "post-ads"] []
+    "必要なものをコンビニで購入します",
+  makeUnlock
+    "coffee-break" "<i class=\"fa fa-coffee fa-fw\"></i>コーヒーブレイク" ["kiosk-shop", "post-ads"] []
+    "コーヒーブレイクをとります<br />仕事の生産性を上げることで施設の生成にかかる時間を短縮します<br /> \
+    \ <strong>注意*</strong> コーヒーを短時間に大量に摂取することは健康に悪影響を及ぼします",
+  makeUnlock
+    "energy-drink" "<i class=\"fa fa-beer fa-fw\"></i>エナジードリンク" ["coffee-break", "post-ads"] []
+    "エナジードリンクを飲みます<br />仕事の生産性を上げることで施設の生成にかかる時間をより短縮します<br /> \
+    \ <strong>注意*</strong> エナジードリンクを短時間に大量に摂取することは健康に悪影響を及ぼします",
+  makeUnlock
+    "mother-will" "<i class=\"fa fa-eye fa-fw\"></i>母なるものの意志" ["root"] []
+    "アカウントの統計情報を送信します<br /> \
+    \ SNS全体の統計情報の一部にアクセスできるようになります"
   ]
 
 buildTree :: [Unlock] -> T.Tree Unlock
@@ -146,8 +208,8 @@ buildTree = build . sortBy comp where
 
   build :: [Unlock] -> T.Tree Unlock
   build xs = go u1 (T.Node r0 (fmap singleT u0)) where
-    r0 = makeUnlock "" "" "" [] []
-    (u0, u1) = partition (\x -> x^.premise == []) xs
+    r0 = makeUnlock [] [] [] [] []
+    (u0, u1) = partition (\x -> x^.premise == [] || head (x^.premise) == "root") xs
     singleT t = T.Node t []
 
     ins y (T.Node l1 ls)
@@ -157,24 +219,28 @@ buildTree = build . sortBy comp where
     go [] t = t
     go (y:ys) t = go ys (ins y t)
 
+getBranchBy :: (a -> b -> Bool) -> a -> T.Tree b -> [b]
+getBranchBy eqf a (T.Node x xs)
+  | eqf a x = fmap T.rootLabel xs
+  | otherwise = concat $ fmap (getBranchBy eqf a) xs
+
 unlockTree :: T.Tree Unlock
 unlockTree = buildTree unlockMap
 
-makeBuilding :: String -> String -> Double -> [String] -> (Double -> Double) -> Building
-makeBuilding i n c p v =
+makeBuilding :: String -> String -> [String] -> (Double -> Double) -> Building
+makeBuilding i n p v =
   sinsert (Tag i :: "ident" :< String) $
   sinsert (Tag n :: "name" :< String) $
-  sinsert (Tag c :: "value" :< Double) $
   sinsert (Tag p :: "premise" :< [String]) $
   sinsert (Tag v :: "interval" :< (Double -> Double)) $
   Union HNil
 
 buildingMap :: [Building]
 buildingMap = [
-  makeBuilding "plugin" "プラグイン" 1 ["install-plugin"] (itvExp 0.2 1.21),
-  makeBuilding "share" "シェア" 1 ["connect-SNS"] (itvExp 0.3 1.21),
-  makeBuilding "code" "コード" 1 ["programming"] (itvExp 0.5 1.21),
-  makeBuilding "account" "アカウント" 1 ["multiple-accounts"] (itvExp 2 1.21)
+  makeBuilding "plugin" "プラグイン" ["install-plugin"] (itvExp 0.2 1.21),
+  makeBuilding "share" "シェア" ["connect-SNS"] (itvExp 0.3 1.21),
+  makeBuilding "code" "コード" ["programming"] (itvExp 0.5 1.21),
+  makeBuilding "account" "アカウント" ["multiple-accounts"] (itvExp 2 1.21)
   ]
   where
     itvExp base pow n = base * pow ^ (floor n)
@@ -196,8 +262,25 @@ itemMap = [
   makeItem "account" "<i class=\"fa fa-envelope fa-fw\"></i>アカウント" "アカウントの数です"
   ]
 
+makeAchievement :: String -> String -> (Game -> Bool) -> Achievement
+makeAchievement n d c =
+  sinsert (Tag n) $
+  sinsert (Tag d) $
+  sinsert (Tag c) $
+  Union HNil
+
+achievementMap :: [Achievement]
+achievementMap = [
+  makeAchievement "<i class=\"fa fa-fw fa-user\"></i>マイ・フレンド" "フレンドの数が1を越える" (\game -> game^.items^.at "friends"^._MNum >= 1),
+  makeAchievement "<i class=\"fa fa-fw fa-user\"></i>友達の輪" "フレンドの数が100を越える" (\game -> game^.items^.at "friends"^._MNum >= 100),
+  makeAchievement "<i class=\"fa fa-fw fa-user\"></i>友達マスター" "フレンドの数が10000を越える" (\game -> game^.items^.at "friends"^._MNum >= 10000)
+  ]
+
 friendsPS :: Game -> Double
 friendsPS game = sqrt (game ^. items ^. at "posts" ^. _MNum) / 1000
+
+buildingPS :: String -> Game -> Double
+buildingPS k game = fromIntegral (game ^. buildings ^. at k ^. _MNum) / 10
 
 putAlert :: String -> IO ()
 putAlert s = void $ do
@@ -230,6 +313,7 @@ maininit ref = void $ do
   displayUnlockShop
   displayBuilding
   displayUnlockTree
+  displayAchievement
 
   eval $ toJSString $ concat $ [
     "$('[data-toggle=\"tooltip\"]').tooltip({",
@@ -252,7 +336,7 @@ maininit ref = void $ do
 
         forM_ itemMap $ \itm -> do
           appendHTML e $ concat $ [
-            _trTT (itm^.description) $ concat [
+            _trTT (itm^.description ++ "<hr />" ++ show (buildingPS (itm^.ident) game) ++ " /s") $ concat [
               _td $ itm^.name,
               _tdWith ["class" -: "text-xs-right", "id" -: ("item-display-" ++ (itm^.ident))] ""
               ]
@@ -271,17 +355,22 @@ maininit ref = void $ do
           let uidbtn = "unlock-" ++ unl^.ident
           let uidspan = "unlock-span-" ++ unl^.ident
           when (M.notMember (unl^.ident) (game^.unlocks) || ((game^.unlocks) M.! (unl^.ident) == False)) $ do
-            when (all (\x -> M.member x (game^.unlocks) && (game^.unlocks) M.! x) $ unl^.premise) $ do
-              appendHTML e $
+            when (all (\x -> M.member x (game^.unlocks) && (game^.unlocks) M.! x) $ unl^.premise \\ ["root"]) $ do
+              let abtn unl = "a" `tag` ["id" -: ("unlock-" ++ unl^.ident), "role" -: "button", "class" -: "btn btn-sm btn-secondary-dark disabled"] $ (unl ^. name)
+
+              appendHTML e $ concat [
                 "div" `tag` [] $
-                "div" `tag` (toolTipAttr (unl ^. description) ++ ["id" -: uidspan, "style" -: "display: inline-block;"]) $
-                "a" `tag` ["id" -: uidbtn, "role" -: "button", "class" -: "btn btn-sm btn-secondary-dark disabled"] $ (unl ^. name)
+                  "div" `tag` (toolTipAttr (unl ^. description ++ "<hr />" ++ requirement unl) ++ ["id" -: uidspan, "style" -: "display: inline-block;"]) $
+                  abtn unl,
+                let lis = concat $ fmap (\u -> "li" `tag` [] $ abtn u) (getBranchBy (\a b -> a^.ident == b^.ident) unl unlockTree) in
+                if lis == "" then "" else "ul" `tag` ["class" -: "tree-view"] $ lis
+                ]
 
         forM_ unlockMap $ \unl -> do
           let uidbtn = "unlock-" ++ unl^.ident
           let uidspan = "unlock-span-" ++ unl^.ident
           when (M.notMember (unl^.ident) (game^.unlocks) || ((game^.unlocks) M.! (unl^.ident) == False)) $ do
-            when (all (\x -> M.member x (game^.unlocks) && (game^.unlocks) M.! x) $ unl^.premise) $ do
+            when (all (\x -> M.member x (game^.unlocks) && (game^.unlocks) M.! x) $ unl^.premise \\ ["root"]) $ do
               withElem uidbtn $ \ebtn -> void $ do
                 onEvent ebtn Click $ \_ -> do
                   refStateT ref $ do
@@ -294,6 +383,8 @@ maininit ref = void $ do
                     eval $ toJSString $ "$('#" ++ adb ++ "').hide();"
 
                   maininit ref
+      where
+        requirement unl = intercalate "<br />" $ fmap (\(k,v) -> k ++ ": " ++ show v) $ unl^.cost
 
     displayUnlockTree = do
       withElem "unlock-tree" $ \e -> do
@@ -382,7 +473,14 @@ maininit ref = void $ do
         labelBuilding bm = do
           game <- readIORef ref
           itv <- intervalBuilding bm
-          return $ (show $ floor $ bm^.value) ++ " / " ++ (printf "%0.2f" itv) ++ " s"
+          return $ (printf "%0.2f" itv) ++ " s"
+
+    displayAchievement = do
+      withElem "trophy-list-div" $ \e -> do
+        forM_ achievementMap $ \ach ->
+          appendHTML e $
+            "div" `tag` ["class" -: "col-lg-3 col-md-4"] $
+              "span" `tag` (["class" -: "achievement-piece"] ++ toolTipAttr (ach^.description)) $ ach^.name
 
 mainloop :: IORef Game -> IO ()
 mainloop ref = do
@@ -393,14 +491,14 @@ mainloop ref = do
   refStateT ref $ do
     game <- get
     forM_ (M.keys (game ^. buildings)) $ \bl -> do
-      items . at bl . _MNum += (fromIntegral (game ^. buildings ^. at bl ^. _MNum) / 10)
+      items . at bl . _MNum += buildingPS bl game
 
   refStateT ref $ do
     game <- get
     forM_ unlockMap $ \unl -> do
       let uidbtn = "unlock-" ++ unl^.ident
       when (M.notMember (unl^.ident) (game^.unlocks) || ((game^.unlocks) M.! (unl^.ident) == False)) $ do
-        when (all (\x -> M.member x (game^.unlocks) && (game^.unlocks) M.! x) $ unl^.premise) $ do
+        when (all (\x -> M.member x (game^.unlocks) && (game^.unlocks) M.! x) $ unl^.premise \\ ["root"]) $ do
           when (all (\(k,v) -> game ^. items ^. at k ^. _MNum >= fromIntegral v) $ unl^.cost) $ do
             withElem uidbtn $ \e -> do
               setClass e "disabled" False

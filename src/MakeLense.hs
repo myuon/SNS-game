@@ -119,8 +119,15 @@ instance SmartInsert k v '[] '[k :< v] where
 instance SmartInsert k v ((k :< v) ': xs) ((k :< v) ': xs) where
   sinsert t = liftHL $ \(HCons _ xs) -> HCons t xs
 
-instance {-# OVERLAPPABLE #-} (SmartInsert k v xs xs') => SmartInsert k v (kv ': xs) (kv ': xs') where
+instance {-# OVERLAPPABLE #-} (SmartInsert k v xs xs') => SmartInsert k v (x ': xs) (x ': xs') where
   sinsert kv (Union (HCons x xs)) = liftHL (HCons x) $ sinsert kv $ Union xs
+
+snoc :: x -> HList xs -> HList (Snoc xs x)
+snoc z HNil = HCons z HNil
+snoc z (HCons x xs) = HCons x (snoc z xs)
+
+instance {-# OVERLAPPABLE #-} (SmartInsert k v xs xs', Snoc xs' x ~ ys) => SmartInsert k v (x ': xs) ys where
+  sinsert kv (Union (HCons x xs)) = liftHL (snoc x) (sinsert kv $ Union xs)
 
 -- pretty error message
 
