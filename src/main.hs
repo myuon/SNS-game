@@ -1,4 +1,4 @@
-{-# LANGUAGE DataKinds, TypeOperators, FlexibleContexts #-}
+{-# LANGUAGE DataKinds, TypeOperators, FlexibleContexts, Rank2Types #-}
 import Haste
 import Haste.DOM
 import Haste.JSON
@@ -9,7 +9,7 @@ import Haste.LocalStorage
 import MakeLense
 import Lens.Family2
 import Lens.Family2.Stock
-import Lens.Family2.Unchecked
+import Lens.Family2.Unchecked hiding (iso)
 import Lens.Family2.State.Lazy
 import Control.Monad.State
 import Data.IORef
@@ -17,7 +17,35 @@ import Data.List
 import qualified Data.Map as M
 import qualified Data.Tree as T
 import qualified Data.Foldable as F
+import Data.Functor.Identity (Identity(..))
 import Text.Printf (printf)
+
+class Profunctor p where
+  dimap :: (a -> b) -> (c -> d) -> p b c -> p a d
+
+instance Profunctor (->) where
+  dimap ab cd bc = cd . bc . ab
+
+type Iso s t a b = forall p f. (Profunctor p, Functor f) => p a (f b) -> p s (f t)
+type Iso' s a = Iso s s a a
+type AnIso s t a b = Exchange a b a (Identity b) -> Exchange a b s (Identity t)
+type AnIso' s a = AnIso s s a a
+
+data Exchange a b s t = Exchange (s -> a) (b -> t)
+
+instance Profunctor (Exchange a b) where
+  dimap f g (Exchange sa bt) = Exchange (sa . f) (g . bt)
+
+iso :: (s -> a) -> (b -> t) -> Iso s t a b
+iso sa bt = dimap sa (fmap bt)
+
+from :: AnIso s t a b -> Iso b a t s
+from l = withIso l $ \sa bt -> iso bt sa
+
+withIso :: AnIso s t a b -> ((s -> a) -> (b -> t) -> r) -> r
+withIso ai k = case ai (Exchange id Identity) of
+  Exchange sa bt -> k sa (runIdentity . bt)
+
 
 latestVersion :: [Int]
 latestVersion = [1,0]
@@ -55,6 +83,15 @@ tag t as x
 -- * breaks lens laws
 _MNum :: (Num a) => Lens' (Maybe a) a
 _MNum = lens (maybe 0 id) (\m x -> Just x)
+
+_digits :: Iso' [Int] Int
+_digits = iso (foldl (\a b -> a * 10 + b) 0) (nonemp . reverse . digit) where
+  digit i = case i of
+    0 -> []
+    _ -> let (r,d) = quotRem i 10 in d : digit r
+
+  nonemp [] = [0]
+  nonemp xs = xs
 
 type Unlock = UnionT '[
   "ident" :< String,
@@ -96,7 +133,8 @@ type Game = UnionT '[
   "items" :< M.Map String Double,
   "unlocks" :< M.Map String Bool,
   "buildings" :< M.Map String Int,
-  "log" :< [String]
+  "log" :< [String],
+  "slot" :< [Int]
   ]
 
 version :: Has (Union xs) "version" out => Lens' (Union xs) out; version = lenses (Name :: Name "version")
@@ -104,6 +142,7 @@ log :: Has (Union xs) "log" out => Lens' (Union xs) out; log = lenses (Name :: N
 unlocks :: Has (Union xs) "unlocks" out => Lens' (Union xs) out; unlocks = lenses (Name :: Name "unlocks")
 items :: Has (Union xs) "items" out => Lens' (Union xs) out; items = lenses (Name :: Name "items")
 buildings :: Has (Union xs) "buildings" out => Lens' (Union xs) out; buildings = lenses (Name :: Name "buildings")
+slot :: Has (Union xs) "slot" out => Lens' (Union xs) out; slot = lenses (Name :: Name "slot")
 
 initialGame :: Game
 initialGame =
@@ -111,7 +150,8 @@ initialGame =
   sinsert (Tag M.empty :: "items" :< M.Map String Double) $
   sinsert (Tag M.empty :: "unlocks" :< M.Map String Bool) $
   sinsert (Tag M.empty :: "buildings" :< M.Map String Int) $
-  sinsert (Tag []) $
+  sinsert (Tag ([] :: [String])) $
+  sinsert (Tag ([1] :: [Int])) $
   Union HNil
 
 makeUnlock :: String -> String -> [String] -> [(String, Int)] -> String -> Unlock
@@ -122,81 +162,6 @@ makeUnlock i n p c d =
   sinsert (Tag p :: "premise" :< [String]) $
   sinsert (Tag c) $
   Union HNil
-
-unlockMap :: [Unlock]
-unlockMap = [
-  makeUnlock
-    "install-plugin" "<i class=\"fa fa-puzzle-piece fa-fw\"></i>プラグイン導入" ["root"] [("posts", 100)]
-    "プラグインを導入します<br />外部アプリケーションを利用することができるようになります" ,
-  makeUnlock
-    "install-client" "<i class=\"fa fa-cube fa-fw\"></i>クライアント導入" ["install-plugin"] [("plugin", 100)]
-    "新しいクライアントを導入します" ,
-  makeUnlock
-    "multiple-accounts" "<i class=\"fa fa-users fa-fw\"></i>サブアカウントの管理" ["install-client"] [("plugin", 5000)]
-    "複数のアカウントを作成し・管理します<br /> \
-    \ <strong>注意*</strong> 無闇に複数のアカウントを作成することは規約違反にあたります",
-  makeUnlock
-    "multiple-accounts-boost" "<i class=\"fa fa-user-plus fa-fw\"></i>アカウント作成効率I" ["multiple-accounts"] []
-    "サブアカウントの作成効率を上げます",
-  makeUnlock
-    "post-bomb" "<i class=\"fa fa-commenting fa-fw\"></i>投稿効率I" ["install-client", "programming"] [("plugin", 10000), ("code", 7000)]
-    "同じ内容のメッセージを一度に大量に投稿することができます<br /> \
-    \ <strong>注意*</strong> 無闇に同じ内容の投稿を繰り返すことは規約違反にあたります",
-  makeUnlock
-    "quote-post" "<i class=\"fa fa-quote-left fa-fw\"></i>人気ポストの引用" ["install-client"] []
-    "タイムラインの人気のポストを引用し、あなたのメッセージとして投稿します<br />これにより、あなたの投稿はより面白いポストで占められます<br /> \
-    \ <strong>注意*</strong> 他人のメッセージを自分のものとして投稿することは規約違反にあたります",
-  makeUnlock
-    "connect-SNS" "<i class=\"fa fa-share-alt fa-fw\"></i>外部アプリ共有" ["install-plugin"] []
-    "メッセージを他のSNSで共有できます",
-  makeUnlock
-    "invitation-mail" "<i class=\"fa fa-envelope fa-fw\"></i>招待メール" ["connect-SNS"] []
-    "招待メールを送ります<br />新規ユーザーが増えます",
-  makeUnlock
-    "make-friends-newcomer" "<i class=\"fa fa-envelope fa-fw\"></i>新規参入フレンド" ["invitation-mail"] []
-    "新規ユーザーとフレンドになります",
-  makeUnlock
-    "post-ads" "<i class=\"fa fa-bullhorn fa-fw\"></i>広告メッセージ" ["connect-SNS"] []
-    "広告リンクを投稿し、クリック数に応じて報酬がもらえる制度を利用できます<br /> \
-    \ <strong>注意*</strong> ターゲットにマッチしない広告はあまり効果がありません",
-  makeUnlock
-    "auto-ads" "<i class=\"fa fa-bullhorn fa-fw\"></i>広告の自動投稿" ["post-ads", "programming-1"] []
-    "広告を自動で投稿します",
-  makeUnlock
-    "programming" "<i class=\"fa fa-laptop fa-fw\"></i>プログラミングI" ["root", "install-plugin"] [("plugin", 3000)]
-    "簡単なプログラムを書いて、ある程度の処理を自動化できます",
-  makeUnlock
-    "auto-post" "<i class=\"fa fa-gear fa-fw\"></i>自動投稿I" ["programming", "install-plugin"] []
-    "定期的にメッセージを投稿できます<br /> \
-    \ <strong>注意*</strong> 短時間に大量の投稿をすることは規約違反にあたります",
-  makeUnlock
-    "programming-2" "<i class=\"fa fa-desktop fa-fw\"></i>プログラミングII" ["programming"] []
-    "より高度なプログラムによって、たくさんの処理を一度に行います",
-  makeUnlock
-    "auto-create-account" "<i class=\"fa fa-user-plus fa-fw\"></i>自動新規アカウント生成" ["programming-2", "multiple-accounts"] []
-    "一定時間ごとに新規アカウントを作成します",
-  makeUnlock
-    "programming-3" "<i class=\"fa fa-desktop fa-fw\"></i>プログラミングIII" ["programming-2"] []
-    "さらに高度なプログラムによって、大量の処理を効率的に自動的に行います",
-  makeUnlock
-    "programmer" "<i class=\"fa fa-male fa-fw\"></i>プログラマの雇用" ["programming-2", "ads-post"] []
-    "プログラマを雇用して、必要な作業を任せることが出来ます",
-  makeUnlock
-    "kiosk-shop" "<i class=\"fa fa-shopping-cart fa-fw\"></i>コンビニの利用" ["root", "post-ads"] []
-    "必要なものをコンビニで購入します",
-  makeUnlock
-    "coffee-break" "<i class=\"fa fa-coffee fa-fw\"></i>コーヒーブレイク" ["kiosk-shop", "post-ads"] []
-    "コーヒーブレイクをとります<br />仕事の生産性を上げることで施設の生成にかかる時間を短縮します<br /> \
-    \ <strong>注意*</strong> コーヒーを短時間に大量に摂取することは健康に悪影響を及ぼします",
-  makeUnlock
-    "energy-drink" "<i class=\"fa fa-beer fa-fw\"></i>エナジードリンク" ["coffee-break", "post-ads"] []
-    "エナジードリンクを飲みます<br />仕事の生産性を上げることで施設の生成にかかる時間をより短縮します<br /> \
-    \ <strong>注意*</strong> エナジードリンクを短時間に大量に摂取することは健康に悪影響を及ぼします",
-  makeUnlock
-    "mother-will" "<i class=\"fa fa-eye fa-fw\"></i>母なるものの意志" ["root"] []
-    "アカウントの統計情報を送信します<br /> \
-    \ SNS全体の統計情報の一部にアクセスできるようになります"
-  ]
 
 buildTree :: [Unlock] -> T.Tree Unlock
 buildTree = build . sortBy comp where
@@ -224,9 +189,6 @@ getBranchBy eqf a (T.Node x xs)
   | eqf a x = fmap T.rootLabel xs
   | otherwise = concat $ fmap (getBranchBy eqf a) xs
 
-unlockTree :: T.Tree Unlock
-unlockTree = buildTree unlockMap
-
 makeBuilding :: String -> String -> [String] -> (Double -> Double) -> Building
 makeBuilding i n p v =
   sinsert (Tag i :: "ident" :< String) $
@@ -235,32 +197,12 @@ makeBuilding i n p v =
   sinsert (Tag v :: "interval" :< (Double -> Double)) $
   Union HNil
 
-buildingMap :: [Building]
-buildingMap = [
-  makeBuilding "plugin" "プラグイン" ["install-plugin"] (itvExp 0.2 1.21),
-  makeBuilding "share" "シェア" ["connect-SNS"] (itvExp 0.3 1.21),
-  makeBuilding "code" "コード" ["programming"] (itvExp 0.5 1.21),
-  makeBuilding "account" "アカウント" ["multiple-accounts"] (itvExp 2 1.21)
-  ]
-  where
-    itvExp base pow n = base * pow ^ (floor n)
-
 makeItem :: String -> String -> String -> Item
 makeItem i n d =
   sinsert (Tag i :: "ident" :< String) $
   sinsert (Tag n :: "name" :< String) $
   sinsert (Tag d :: "description" :< String) $
   Union HNil
-
-itemMap :: [Item]
-itemMap = [
-  makeItem "friends" "<i class=\"fa fa-user fa-fw\"></i>フレンド" "フレンドが多くなると楽しいですね<hr />0 /s",
-  makeItem "posts" "<i class=\"fa fa-comment fa-fw\"></i>投稿" "多くの投稿は多くのフレンドを集めます",
-  makeItem "plugin" "<i class=\"fa fa-puzzle-piece fa-fw\"></i>プラグイン" "外部プラグインを利用します",
-  makeItem "share" "<i class=\"fa fa-share-alt fa-fw\"></i>シェア" "外部SNSへシェアした回数です",
-  makeItem "code" "<i class=\"fa fa-code fa-fw\"></i>コード" "プログラム技能を使って書いたコードの量です",
-  makeItem "account" "<i class=\"fa fa-envelope fa-fw\"></i>アカウント" "アカウントの数です"
-  ]
 
 makeAchievement :: String -> String -> (Game -> Bool) -> Achievement
 makeAchievement n d c =
@@ -269,15 +211,104 @@ makeAchievement n d c =
   sinsert (Tag c) $
   Union HNil
 
-achievementMap :: [Achievement]
-achievementMap = [
-  makeAchievement "<i class=\"fa fa-fw fa-user\"></i>マイ・フレンド" "フレンドの数が1を越える" (\game -> game^.items^.at "friends"^._MNum >= 1),
-  makeAchievement "<i class=\"fa fa-fw fa-user\"></i>友達の輪" "フレンドの数が100を越える" (\game -> game^.items^.at "friends"^._MNum >= 100),
-  makeAchievement "<i class=\"fa fa-fw fa-user\"></i>友達マスター" "フレンドの数が10000を越える" (\game -> game^.items^.at "friends"^._MNum >= 10000)
+unlockMap :: [Unlock]
+unlockMap = [
+  makeUnlock
+    "IQ-test" "<i class=\"fa fa-pencil fa-fw\"></i>IQテストの導入" ["root"] []
+    "IQテストによってIQを向上させます",
+  makeUnlock
+    "IQ-test-suppliment" "<i class=\"fa fa-paperclip fa-fw\"></i>サプリメントの導入" ["IQ-test"] [("test", 5000)]
+    "サプリメントを導入してIQテストの効率を上げます",
+  makeUnlock
+    "make-IQ-test" "<i class=\"fa fa-paperclip fa-fw\"></i>IQテストの提供" ["IQ-test"] []
+    "政府へレギュレーションに違反するIQテストを提供します<br />これにより国民の平均IQが下がります",
+  makeUnlock
+    "training-game" "<i class=\"fa fa-gamepad fa-fw\"></i>脳トレゲームの購入" ["root"] [("IQ", 200), ("test", 5000)]
+    "脳トレゲームで脳を鍛えます",
+  makeUnlock
+    "make-training-game" "<i class=\"fa fa-gamepad fa-fw\"></i>脳トレゲームの作成" ["training-game"] []
+    "間違った方法の脳トレゲームを作成します<br />購入した人のIQを下げます",
+  makeUnlock
+    "IQ-rps-tournament" "<i class=\"fa fa-hand-rock-o fa-fw\"></i>IQジャンケン大会I" ["root"] [("test", 10000)]
+    "定期的にIQジャンケン大会を主催し、それに参加します<br /><strong>IQジャンケン</strong>: ジャンケンをしてIQが高いほうが勝利する",
+  makeUnlock
+    "IQ-rps-tournament-2" "<i class=\"fa fa-hand-peace-o fa-fw\"></i>IQジャンケン大会II" ["IQ-rps-tournament"] []
+    "「IQジャンケン大会では、主催者以外はグーを出せない」というルールを追加します",
+  makeUnlock
+    "IQ-rps-tournament-3" "<i class=\"fa fa-hand-paper-o fa-fw\"></i>IQジャンケン大会III" ["IQ-rps-tournament-2"] []
+    "「IQジャンケン大会では、主催者以外はパーを出さなければならない」というルールを追加します",
+  makeUnlock
+    "IQ-rps-tournament-4" "<i class=\"fa fa-hand-spock-o fa-fw\"></i>IQジャンケン大会IV" ["IQ-rps-tournament-3"] []
+    "主催者は一度に3人とジャンケンができるようになります",
+  makeUnlock
+    "IQ-rps-tournament-4" "<i class=\"fa fa-hand-lizard-o fa-fw\"></i>IQジャンケン大会V" ["IQ-rps-tournament-4"] []
+    "主催者は一度に9人とジャンケンができるようになります",
+  makeUnlock
+    "open-lab" "<i class=\"fa fa-flask fa-fw\"></i>研究所" ["root"] [("IQ", 10000)]
+    "IQ向上の研究を行います",
+  makeUnlock
+    "discover-IQ-gene" "<i class=\"fa fa-search fa-fw\"></i>IQ遺伝子の発見" ["open-lab"] []
+    "IQを決定するIQ遺伝子を研究します",
+  makeUnlock
+    "IQ-gene-creature" "<i class=\"fa fa-search fa-fw\"></i>IQ遺伝子組み換え" ["discover-IQ-gene"] []
+    "IQ遺伝子を組み換えられた生命体を初めて実験的に作ります",
+  makeUnlock
+    "bio-gorilla" "<i class=\"fa fa-bomb fa-fw\"></i>IQバイオゴリラ(IQ105)" ["IQ-gene-creature"] []
+    "「ジャングル IQヒクイモノ イキノコレナイ！」<br />IQバイオゴリラが自分よりIQが低い人間を粉砕する！<br />ジャングルでは低IQは命取りなのだ！",
+  makeUnlock
+    "low-IQ-food" "<i class=\"fa fa-bomb fa-fw\"></i>低IQ食品" ["IQ-gene-creature"] []
+    "IQを下げる効果を持つ低カロリー食品を売り出します",
+  makeUnlock
+    "angel-help" "<i class=\"fa fa-heart-o fa-fw\"></i>天使の導き" ["root"] []
+    "天使と契約し、その導きに従います",
+  makeUnlock
+    "angel-gear" "<i class=\"fa fa-gear fa-fw\"></i>光のギア" ["angel-help"] []
+    "眩しい光を放つギアを手に入れます<br />ギアは触れた者のIQをわずかに上昇させます",
+  makeUnlock
+    "angel-machine" "<i class=\"fa fa-gears fa-fw\"></i>IQマシーン" ["angel-gear"] []
+    "IQマシーンに触れた人間はIQが少し高くなります",
+  makeUnlock
+    "devil-help" "<i class=\"fa fa-heart fa-fw\"></i>悪魔の囁き" ["root"] []
+    "悪魔と契約し、その囁きに従います",
+  makeUnlock
+    "devil-gear" "<i class=\"fa fa-gear fa-fw\"></i>闇のギア" ["devil-help"] []
+    "吸い込まれそうな闇を湛えたギアを手に入れます<br />ギアは触れた者のIQをわずかに減少させます",
+  makeUnlock
+    "devil-machine" "<i class=\"fa fa-gears fa-fw\"></i>IQマシーン" ["devil-gear"] []
+    "IQマシーンに触れた人間はIQが少し低くなります"
   ]
 
-friendsPS :: Game -> Double
-friendsPS game = sqrt (game ^. items ^. at "posts" ^. _MNum) / 1000
+unlockTree :: T.Tree Unlock
+unlockTree = buildTree unlockMap
+
+buildingMap :: [Building]
+buildingMap = [
+  makeBuilding "test" "テスト結果" ["IQ-test"] (itvExp 0.05 2),
+  makeBuilding "score" "脳トレゲーム" ["training-game"] (itvExp 0.1 1.6),
+  makeBuilding "tournament" "IQジャンケン大会" ["IQ-rps-tournament"] (itvExp 0.3 1.41),
+  makeBuilding "lab" "研究所" ["open-lab"] (itvExp 0.2 1.21)
+  ]
+  where
+    itvExp base pow n = base * pow ^ (floor n)
+
+itemMap :: [Item]
+itemMap = [
+  makeItem "IQ" "<i class=\"fa fa-fw fa-question-circle\"></i>IQ" "現在のあなたのIQです",
+  makeItem "test" "<i class=\"fa fa-fw fa-pencil\"></i>テスト" "IQテストによってIQが上昇します",
+  makeItem "score" "<i class=\"fa fa-fw fa-gamepad\"></i>スコア" "ゲームによって稼いだスコアです",
+  makeItem "tournament" "<i class=\"fa fa-fw fa-hand-rock-o\"></i>勝利数" "IQジャンケンに勝った回数です",
+  makeItem "lab" "<i class=\"fa fa-fw fa-flask\"></i>研究成果" "研究所の出した成果です"
+  ]
+
+achievementMap :: [Achievement]
+achievementMap = [
+  makeAchievement "<i class=\"fa fa-fw fa-question-circle\"></i>普通代表" "IQが100を越える" (\game -> game^.items^.at "IQ"^._MNum >= 100),
+  makeAchievement "<i class=\"fa fa-fw fa-question-circle\"></i>天才" "IQが200を越える" (\game -> game^.items^.at "IQ"^._MNum >= 200),
+  makeAchievement "<i class=\"fa fa-fw fa-question-circle\"></i>桁違いの天才" "IQが1000を越える" (\game -> game^.items^.at "IQ"^._MNum >= 1000)
+  ]
+
+iqPS :: Game -> Double
+iqPS game = sqrt (game ^. items ^. at "test" ^. _MNum) / 1000
 
 buildingPS :: String -> Game -> Double
 buildingPS k game = fromIntegral (game ^. buildings ^. at k ^. _MNum) / 10
@@ -314,6 +345,7 @@ maininit ref = void $ do
   displayBuilding
   displayUnlockTree
   displayAchievement
+  displaySlot
 
   eval $ toJSString $ concat $ [
     "$('[data-toggle=\"tooltip\"]').tooltip({",
@@ -328,6 +360,37 @@ maininit ref = void $ do
     _buttonTT as t = _buttonWith (toolTipAttr t ++ as)
     _buttonTTWith eid as = _buttonTT (["id" -: eid] ++ as)
     _div = "div" `tag` []
+
+    displaySlot = do
+      withElem "slot" $ \e -> do
+        game <- readIORef ref
+        setHTML e ""
+
+        forM_ [0..length (game^.slot) - 1] $ \i -> do
+          let cid = "caret-button-id-" ++ show (length (game^.slot) - 1 - i)
+          appendHTML e $ "div" `tag` ["class" -: "slot-div"] $ concat [
+            _p $ "a" `tag` ["id" -: (cid ++ "-up"), "role" -: "button", "class" -: "caret-button"] $ "<i class=\"fa fa-caret-up\"></i>",
+            _p $ show $ (game^.slot) !! i,
+            _p $ "a" `tag` ["id" -: (cid ++ "-down"), "role" -: "button", "class" -: "caret-button"] $ "<i class=\"fa fa-caret-down\"></i>"
+            ]
+
+        forM_ [0..length (game^.slot) - 1] $ \i -> do
+          let cid = "caret-button-id-" ++ show i
+
+          withElem (cid ++ "-up") $ \ebtn ->
+            onEvent ebtn Click $ \_ -> do
+              refStateT ref $ slot . _digits += (10 ^ i)
+              displaySlot
+
+          withElem (cid ++ "-down") $ \ebtn ->
+            onEvent ebtn Click $ \_ -> do
+              refStateT ref $ do
+                use (slot . _digits) >>= \n -> when (n - (10^i) >= 0) $ do
+                  slot . _digits -= (10 ^ i)
+              displaySlot
+
+      where
+        _p = "p" `tag` ["class" -: "no-margin"]
 
     displayItem = do
       withElem "item-display-tbody" $ \e -> do
@@ -486,7 +549,7 @@ mainloop :: IORef Game -> IO ()
 mainloop ref = do
   refStateT ref $ do
     game <- get
-    items . at "friends" . _MNum += friendsPS game
+    items . at "IQ" . _MNum += iqPS game
 
   refStateT ref $ do
     game <- get
@@ -511,7 +574,7 @@ mainloop ref = do
       setHTML e $ show $ floor $ game ^. items ^. at (itm^.ident) ^. _MNum
 
   withElem "id-for-trTT" $ \e -> do
-    setAttr e "data-original-title" $ "フレンドが多くなると楽しいですね<hr />" ++ printf "%.3f" (friendsPS game) ++ " /s"
+    setAttr e "data-original-title" $ "フレンドが多くなると楽しいですね<hr />" ++ printf "%.3f" (iqPS game) ++ " /s"
 
 main = do
   s <- getItem "FriendtheNet"
@@ -521,13 +584,6 @@ main = do
       newIORef initialGame
     Right x -> do
       newIORef x
-
-  withElem "message-post" $ \e ->
-    onEvent e Click $ \_ -> do
-      modifyIORef ref $ items . at "posts" . _MNum +~ 1
-
-  withElem "btn-save" $ \e ->
-    onEvent e Click $ \_ -> save ref
 
   withElem "link-for-save" $ \e -> onEvent e Click $ \_ -> save ref
   withElem "link-for-reset" $ \e -> onEvent e Click $ \_ -> do
